@@ -1,58 +1,73 @@
-from typing import Dict, List, Optional
-from app.utils.ocr import process_image, process_multiple_images
-from app.utils.ai import analyze_document
-from app.models.document import DocumentType
-from app.security.security import redact_pii
+from typing import Dict, List, Optional, Any
+from app.utils.ocr import TesseractOCR
+from app.utils.ai import OpenAIProcessor
+from app.utils.storage import S3Storage
+from app.utils.validation import DocumentValidator
+from app.utils.logging import DocumentLogger
+from app.utils.metrics import MetricsCollector
+from app.models.document import Document, DocumentStatus, DocumentType
+from app.security import get_current_user
 import json
 import time
 from datetime import datetime
+from fastapi import HTTPException
+from app.utils.exceptions import DocumentProcessingError
 
 class DocumentProcessor:
     def __init__(self):
+        self.ocr = TesseractOCR()
+        self.ai_processor = OpenAIProcessor()
+        self.storage = S3Storage()
+        self.validator = DocumentValidator()
+        self.logger = DocumentLogger()
+        self.metrics = MetricsCollector()
         self.supported_formats = settings.SUPPORTED_FILE_TYPES
         self.max_file_size = settings.MAX_FILE_SIZE
-        self.processing_times = []
 
-    async def process_document(self, file: bytes, file_type: str, document_type: DocumentType) -> Dict:
+    async def process_document(self, document: Document) -> Dict[str, Any]:
         """
-        Process a document and extract relevant information
+        Process a document with enhanced validation and error handling
         """
-        start_time = time.time()
-
-        if file_type not in self.supported_formats:
-            raise ValueError(f"Unsupported file type: {file_type}")
-
-        if len(file) > self.max_file_size:
-            raise ValueError("File size exceeds maximum allowed size")
-
         try:
-            if file_type in ['.jpg', '.png']:
-                # Process image file
-                text = await process_image(file)
-            else:
-                # Process PDF/DOCX file
-                text = await self._extract_text_from_file(file, file_type)
-
-            # Redact PII before AI analysis
-            redacted_text = redact_pii(text)
-
-            # Analyze document using AI
-            analysis = await analyze_document(redacted_text, document_type.value)
-
-            # Track processing time
-            processing_time = time.time() - start_time
-            self.processing_times.append(processing_time)
-
+            # 1. Validate document
+            if not self.validator.validate(document):
+                raise DocumentProcessingError("Document validation failed")
+            
+            # 2. Extract text using OCR
+            text = await self.ocr.extract_text(document)
+            
+            # 3. Process with AI
+            processed_data = await self.ai_processor.process(text)
+            
+            # 4. Store processed document
+            await self.storage.store_processed_document(document, processed_data)
+            
+            # 5. Log processing
+            self.logger.log_processing(document, processed_data)
+            
+            # 6. Collect metrics
+            processing_time = time.time() - document.created_at.timestamp()
+            self.metrics.collect_metrics(document, processed_data, processing_time)
+            
             return {
                 "status": "success",
-                "text": text,
-                "redacted_text": redacted_text,
-                "analysis": analysis,
+                "document_id": document.id,
+                "processed_data": processed_data,
                 "processing_time": processing_time,
                 "processed_at": datetime.utcnow().isoformat()
             }
+        except DocumentProcessingError as e:
+            self.logger.log_error(document, str(e))
+            raise HTTPException(
+                status_code=422,
+                detail=str(e)
+            )
         except Exception as e:
-            raise Exception(f"Error processing document: {str(e)}")
+            self.logger.log_error(document, str(e))
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected error occurred during document processing"
+            )
 
     async def _extract_text_from_file(self, file: bytes, file_type: str) -> str:
         """
@@ -61,6 +76,7 @@ class DocumentProcessor:
         if file_type == '.pdf':
             # Convert PDF to images and process
             images = await self._convert_pdf_to_images(file)
+            return await self.process_multiple_images(images)
             return await process_multiple_images(images)
         elif file_type == '.docx':
             # Extract text from DOCX

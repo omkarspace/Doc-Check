@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from app.config import settings
@@ -6,25 +6,48 @@ from app.api import api_router
 from app.api.v1 import dashboard
 from app.database import init_db
 from app.middleware.static_files import setup_static_files
-from app.utils.monitoring import setup_monitoring
+from app.utils.monitoring import Monitoring
+from app.security import get_current_user
+import logging
+import time
 
 app = FastAPI(
     title="DocuGenie - Intelligent Document Processing",
     description="AI-powered document processing platform for BFSI institutions",
-    version="1.0.0"
+    version=settings.VERSION,
+    openapi_url="/api/v1/openapi.json"
 )
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Setup monitoring
-app = setup_monitoring(app)
+# Initialize monitoring
+monitoring = Monitoring()
+monitoring.setup_metrics(app)
+app = monitoring.setup_sentry(app)
+
+# Add request monitoring middleware
+@app.middleware("http")
+async def monitor_requests(request: Request, call_next):
+    start_time = time.time()
+    monitoring.track_active_request()
+    
+    response = await call_next(request)
+    
+    processing_time = time.time() - start_time
+    monitoring.track_document_processing(
+        document_type="unknown",
+        status=str(response.status_code),
+        processing_time=processing_time
+    )
+    
+    return response
 
 # Setup static files
 app = setup_static_files(app)
@@ -37,7 +60,7 @@ app.include_router(api_router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api/v1")
 
 @app.get("/")
-def read_root():
+async def read_root(user: str = Depends(get_current_user)):
     return {"message": "Welcome to DocuGenie - Intelligent Document Processing Platform"}
 
 if __name__ == "__main__":
