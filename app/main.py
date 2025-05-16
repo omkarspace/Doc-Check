@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from app.config import settings
 from app.api import api_router
+from app.api.v1 import dashboard
 from app.database import init_db
 from app.middleware.static_files import setup_static_files
 from app.utils.monitoring import setup_monitoring
@@ -33,6 +34,7 @@ init_db()
 
 # Include API router
 app.include_router(api_router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api/v1")
 
 @app.get("/")
 def read_root():
