@@ -1,5 +1,7 @@
-from pydantic_settings import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+from typing import List
 
 class Settings(BaseSettings):
     # API Settings
@@ -13,11 +15,11 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
 
     # Database Settings
-    POSTGRES_SERVER: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
-    DATABASE_URI: str = None
+    DATABASE_URI: str = "sqlite:///./docugenie.db"
+    
+    @property
+    def SQLALCHEMY_DATABASE_URI(self) -> str:
+        return self.DATABASE_URI
 
     # OpenAI Settings
     OPENAI_API_KEY: str
@@ -32,10 +34,20 @@ class Settings(BaseSettings):
     # Document Processing Settings
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     SUPPORTED_FILE_TYPES: list = [".pdf", ".docx", ".jpg", ".png"]
-
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
+    
+    # CORS Settings
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    
+    # Monitoring Settings
+    SENTRY_DSN: str = ""
+    ENVIRONMENT: str = "development"
+    
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        env_file=".env",
+        env_file_encoding='utf-8',
+        extra='ignore'  # Ignore extra fields in .env file
+    )
 
 @lru_cache()
 def get_settings():

@@ -39,14 +39,19 @@ class Monitoring:
         # Initialize Prometheus instrumentator
         self.instrumentator = Instrumentator()
         
-        # Initialize Sentry for error tracking
-        init(
-            dsn=settings.SENTRY_DSN,
-            traces_sample_rate=1.0,
-            environment=settings.ENVIRONMENT,
-            integrations=[SentryAsgiMiddleware],
-            release=settings.VERSION
-        )
+        # Initialize Sentry for error tracking if DSN is provided
+        if settings.SENTRY_DSN and settings.SENTRY_DSN != "your-sentry-dsn-here":
+            init(
+                dsn=settings.SENTRY_DSN,
+                traces_sample_rate=1.0,
+                environment=settings.ENVIRONMENT,
+                integrations=[SentryAsgiMiddleware],
+                release=settings.VERSION
+            )
+            self.sentry_enabled = True
+        else:
+            self.sentry_enabled = False
+            logging.warning("Sentry DSN not configured. Error tracking will be limited to logs.")
 
     def setup_metrics(self, app):
         """Setup Prometheus metrics for the FastAPI app"""
@@ -56,8 +61,10 @@ class Monitoring:
         self.instrumentator.expose(app)
 
     def setup_sentry(self, app):
-        """Setup Sentry error tracking"""
-        return SentryAsgiMiddleware(app)
+        """Setup Sentry for error tracking if enabled"""
+        if self.sentry_enabled:
+            return SentryAsgiMiddleware(app)
+        return app
 
     def track_document_processing(self, document_type: str, status: str, processing_time: float):
         """Track document processing metrics"""

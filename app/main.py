@@ -2,12 +2,11 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from app.config import settings
-from app.api import api_router
-from app.api.v1 import dashboard
 from app.database import init_db
 from app.middleware.static_files import setup_static_files
 from app.utils.monitoring import Monitoring
 from app.security import get_current_user
+from app.api.v1 import api as v1_api
 import logging
 import time
 
@@ -55,9 +54,8 @@ app = setup_static_files(app)
 # Initialize database
 init_db()
 
-# Include API router
-app.include_router(api_router, prefix="/api")
-app.include_router(dashboard.router, prefix="/api/v1")
+# Include API routers
+app.include_router(v1_api.router, prefix="/api/v1")
 
 @app.get("/")
 async def read_root(user: str = Depends(get_current_user)):
