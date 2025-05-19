@@ -1,141 +1,112 @@
-from typing import List, Dict, Optional
-from app.models.batch import Batch, BatchStatus
-from app.models.document import Document
-from app.services.document_processor import DocumentProcessor
-from app.database.database import SessionLocal
-from sqlalchemy.orm import Session
-import asyncio
+import os
+import shutil
+from typing import List, Optional
 from datetime import datetime
+from sqlalchemy.orm import Session
 
-class BatchProcessor:
-    def __init__(self):
-        self.document_processor = DocumentProcessor()
-        self.batch_size = settings.BATCH_SIZE
+from app.models.batch import Batch, BatchStatus
+from app.models.document import Document, DocumentType
+from app.models.document_version import DocumentVersion
+from app.services.document_processor import process_document
 
-    async def create_batch(self, name: str, description: str, document_type: str, owner_id: int, db: Session) -> Dict:
-        """
-        Create a new batch processing job
-        """
-        batch = Batch(
-            name=name,
-            description=description,
-            document_type=document_type,
-            owner_id=owner_id
-        )
-        db.add(batch)
-        db.commit()
-        db.refresh(batch)
-        return batch.__dict__
-
-    async def add_documents_to_batch(self, batch_id: int, files: List[bytes], db: Session) -> Dict:
-        """
-        Add documents to an existing batch
-        """
+def process_batch(batch_id: int, db: Session):
+    """
+    Process a batch of documents asynchronously.
+    This function is designed to be run in a background task.
+    """
+    try:
+        # Get the batch
         batch = db.query(Batch).filter(Batch.id == batch_id).first()
         if not batch:
-            raise ValueError("Batch not found")
-
-        if batch.status != BatchStatus.PENDING:
-            raise ValueError("Cannot add documents to a non-pending batch")
-
-        documents = []
-        for file in files:
-            document = Document(
-                filename=f"batch_{batch_id}_{len(batch.documents) + 1}",
-                file_type=file.filename.split('.')[-1],
-                document_type=batch.document_type,
-                batch_id=batch_id,
-                owner_id=batch.owner_id
-            )
-            documents.append(document)
-
-        db.add_all(documents)
-        batch.total_documents += len(files)
+            print(f"Batch {batch_id} not found")
+            return
+        
+        # Update batch status to PROCESSING
+        batch.status = BatchStatus.PROCESSING
+        batch.updated_at = datetime.utcnow()
         db.commit()
-
-        return {
-            "batch_id": batch_id,
-            "documents_added": len(files),
-            "total_documents": batch.total_documents
-        }
-
-    async def process_batch(self, batch_id: int, db: Session) -> Dict:
-        """
-        Process all documents in a batch
-        """
-        batch = db.query(Batch).filter(Batch.id == batch_id).first()
-        if not batch:
-            raise ValueError("Batch not found")
-
-        if batch.status != BatchStatus.PENDING:
-            raise ValueError("Batch is not in pending state")
-
-        try:
-            batch.status = BatchStatus.PROCESSING
-            db.commit()
-
-            documents = db.query(Document).filter(
-                Document.batch_id == batch_id,
-                Document.status == "pending"
-            ).all()
-
-            # Process documents in parallel
-            results = await asyncio.gather(
-                *[self.document_processor.process_document(
-                    doc.file_content,
-                    doc.file_type,
-                    doc.document_type
-                ) for doc in documents]
-            )
-
-            # Update document statuses
-            for result, doc in zip(results, documents):
-                doc.processed_text = result["text"]
-                doc.ai_analysis = result["analysis"]
-                doc.status = "processed"
-                batch.processed_documents += 1
-                batch.success_count += 1
-
-            batch.status = BatchStatus.COMPLETED
-            db.commit()
-
-            return {
-                "batch_id": batch_id,
-                "status": batch.status,
-                "processed_documents": batch.processed_documents,
-                "success_count": batch.success_count,
-                "error_count": batch.error_count
-            }
-
-        except Exception as e:
+        
+        # Process each file in the batch directory
+        processed_count = 0
+        for filename in os.listdir(batch.file_path):
+            file_path = os.path.join(batch.file_path, filename)
+            
+            if os.path.isfile(file_path):
+                try:
+                    # Process the document
+                    process_document(
+                        file_path=file_path,
+                        document_type=batch.document_type,
+                        batch_id=batch.id,
+                        owner_id=batch.owner_id,
+                        db=db
+                    )
+                    processed_count += 1
+                except Exception as e:
+                    print(f"Error processing {filename}: {str(e)}")
+        
+        # Update batch status
+        batch.status = BatchStatus.COMPLETED
+        batch.processed_count = processed_count
+        batch.completed_at = datetime.utcnow()
+        batch.updated_at = datetime.utcnow()
+        
+    except Exception as e:
+        print(f"Error processing batch {batch_id}: {str(e)}")
+        if batch:
             batch.status = BatchStatus.FAILED
-            batch.error_count += 1
-            db.commit()
-            raise Exception(f"Error processing batch: {str(e)}")
+            batch.updated_at = datetime.utcnow()
+    
+    finally:
+        db.commit()
+        db.close()
 
-    async def get_batch_status(self, batch_id: int, db: Session) -> Dict:
-        """
-        Get the status of a batch processing job
-        """
-        batch = db.query(Batch).filter(Batch.id == batch_id).first()
-        if not batch:
-            raise ValueError("Batch not found")
-
-        return {
-            "batch_id": batch.id,
-            "name": batch.name,
-            "status": batch.status,
-            "total_documents": batch.total_documents,
-            "processed_documents": batch.processed_documents,
-            "success_count": batch.success_count,
-            "error_count": batch.error_count,
-            "created_at": batch.created_at.isoformat(),
-            "updated_at": batch.updated_at.isoformat()
-        }
-
-    async def list_batches(self, owner_id: int, db: Session) -> List[Dict]:
-        """
-        List all batches for a user
-        """
-        batches = db.query(Batch).filter(Batch.owner_id == owner_id).all()
-        return [batch.__dict__ for batch in batches]
+def process_document(
+    file_path: str,
+    document_type: DocumentType,
+    batch_id: int,
+    owner_id: int,
+    db: Session
+) -> Document:
+    """
+    Process a single document and create corresponding database records.
+    """
+    try:
+        # Extract filename from path
+        filename = os.path.basename(file_path)
+        
+        # Create document record
+        document = Document(
+            title=filename,
+            content=None,  # Will be extracted during processing
+            file_path=file_path,
+            document_type=document_type,
+            owner_id=owner_id,
+            batch_id=batch_id
+        )
+        
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+        
+        # Create initial document version
+        version = DocumentVersion(
+            document_id=document.id,
+            version_number=1,
+            content=None,  # Will be extracted during processing
+            file_path=file_path,
+            created_by=owner_id
+        )
+        
+        db.add(version)
+        db.commit()
+        
+        # TODO: Add document processing logic here
+        # For example, extract text, process content, etc.
+        
+        return document
+        
+    except Exception as e:
+        db.rollback()
+        print(f"Error processing document {file_path}: {str(e)}")
+        raise

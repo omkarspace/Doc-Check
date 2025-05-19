@@ -1,7 +1,8 @@
 from typing import List, Dict, Optional
+from fastapi import Depends
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.database.database import SessionLocal
+from app.database.database import SessionLocal, get_db
 from sqlalchemy.orm import Session
 import json
 import csv
@@ -17,7 +18,7 @@ class ExportService:
         document_id: int,
         format: str,
         version: Optional[int] = None,
-        db: Session = Depends(get_db)
+        db: Session = None
     ) -> bytes:
         """
         Export a document in the specified format

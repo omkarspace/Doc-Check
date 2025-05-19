@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Dict
+from typing import List, Dict, Optional
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
+from app.models.user import User
 from app.services.export_service import ExportService
 from app.security.auth import get_current_active_user
 from app.database.database import SessionLocal

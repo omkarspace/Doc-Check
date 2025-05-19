@@ -1,121 +1,107 @@
-from typing import Dict, List, Optional, Any
-from app.utils.ocr import TesseractOCR
-from app.utils.ai import OpenAIProcessor
-from app.utils.storage import S3Storage
-from app.utils.validation import DocumentValidator
-from app.utils.logging import DocumentLogger
-from app.utils.metrics import MetricsCollector
-from app.models.document import Document, DocumentStatus, DocumentType
-from app.security import get_current_user
-import json
-import time
+import os
+import mimetypes
+from typing import Dict, Optional, Any, List
 from datetime import datetime
-from fastapi import HTTPException
-from app.utils.exceptions import DocumentProcessingError
 
-class DocumentProcessor:
-    def __init__(self):
-        self.ocr = TesseractOCR()
-        self.ai_processor = OpenAIProcessor()
-        self.storage = S3Storage()
-        self.validator = DocumentValidator()
-        self.logger = DocumentLogger()
-        self.metrics = MetricsCollector()
-        self.supported_formats = settings.SUPPORTED_FILE_TYPES
-        self.max_file_size = settings.MAX_FILE_SIZE
+from sqlalchemy.orm import Session
 
-    async def process_document(self, document: Document) -> Dict[str, Any]:
-        """
-        Process a document with enhanced validation and error handling
-        """
-        try:
-            # 1. Validate document
-            if not self.validator.validate(document):
-                raise DocumentProcessingError("Document validation failed")
-            
-            # 2. Extract text using OCR
-            text = await self.ocr.extract_text(document)
-            
-            # 3. Process with AI
-            processed_data = await self.ai_processor.process(text)
-            
-            # 4. Store processed document
-            await self.storage.store_processed_document(document, processed_data)
-            
-            # 5. Log processing
-            self.logger.log_processing(document, processed_data)
-            
-            # 6. Collect metrics
-            processing_time = time.time() - document.created_at.timestamp()
-            self.metrics.collect_metrics(document, processed_data, processing_time)
-            
-            return {
-                "status": "success",
-                "document_id": document.id,
-                "processed_data": processed_data,
-                "processing_time": processing_time,
-                "processed_at": datetime.utcnow().isoformat()
-            }
-        except DocumentProcessingError as e:
-            self.logger.log_error(document, str(e))
-            raise HTTPException(
-                status_code=422,
-                detail=str(e)
-            )
-        except Exception as e:
-            self.logger.log_error(document, str(e))
-            raise HTTPException(
-                status_code=500,
-                detail="An unexpected error occurred during document processing"
-            )
+from app.models.document import Document, DocumentType
+from app.models.document_version import DocumentVersion
+from app.models.batch import BatchStatus
 
-    async def _extract_text_from_file(self, file: bytes, file_type: str) -> str:
-        """
-        Extract text from PDF or DOCX file
-        """
-        if file_type == '.pdf':
-            # Convert PDF to images and process
-            images = await self._convert_pdf_to_images(file)
-            return await self.process_multiple_images(images)
-            return await process_multiple_images(images)
-        elif file_type == '.docx':
-            # Extract text from DOCX
-            return await self._extract_text_from_docx(file)
-        return ""
+# TODO: Import and implement these utility functions
+# from app.utils.ocr import extract_text_from_file
+# from app.utils.ai import analyze_document
 
-    async def _convert_pdf_to_images(self, pdf_file: bytes) -> List[bytes]:
-        """
-        Convert PDF to images for OCR processing
-        """
-        # Implementation using pdf2image
-        pass
-
-    async def _extract_text_from_docx(self, docx_file: bytes) -> str:
-        """
-        Extract text from DOCX file
-        """
-        # Implementation using python-docx
-        pass
-
-    def get_processing_statistics(self) -> Dict:
-        """
-        Get document processing statistics
-        """
-        if not self.processing_times:
-            return {
-                "total_documents": 0,
-                "average_processing_time": 0,
-                "fastest_processing": 0,
-                "slowest_processing": 0
-            }
-
-        avg_time = sum(self.processing_times) / len(self.processing_times)
-        fastest = min(self.processing_times)
-        slowest = max(self.processing_times)
-
-        return {
-            "total_documents": len(self.processing_times),
-            "average_processing_time": avg_time,
-            "fastest_processing": fastest,
-            "slowest_processing": slowest
+def process_document(
+    file_path: str,
+    document_type: DocumentType,
+    batch_id: int,
+    owner_id: int,
+    db: Session
+) -> Document:
+    """
+    Process a single document:
+    1. Extract text content
+    2. Analyze document
+    3. Create document and version records
+    4. Update batch status if needed
+    """
+    try:
+        # Extract filename and extension
+        filename = os.path.basename(file_path)
+        file_ext = os.path.splitext(filename)[1].lower()
+        
+        # Determine MIME type
+        mime_type, _ = mimetypes.guess_type(file_path)
+        
+        # Extract text content (placeholder - implement actual extraction)
+        # content = extract_text_from_file(file_path, mime_type)
+        content = f"Extracted text from {filename}. This is a placeholder for the actual content."
+        
+        # Analyze document (placeholder - implement actual analysis)
+        # analysis = analyze_document(content, document_type)
+        analysis = {
+            "type": document_type,
+            "pages": 1,
+            "language": "en",
+            "entities": []
         }
+        
+        # Create document record
+        document = Document(
+            title=filename,
+            content=content,
+            file_path=file_path,
+            document_type=document_type,
+            owner_id=owner_id,
+            batch_id=batch_id,
+            metadata={
+                "file_type": mime_type or "application/octet-stream",
+                "file_size": os.path.getsize(file_path),
+                "analysis": analysis
+            }
+        )
+        
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+        
+        # Create initial document version
+        version = DocumentVersion(
+            document_id=document.id,
+            version_number=1,
+            content=content,
+            file_path=file_path,
+            changes={"initial_version": True},
+            created_by=owner_id
+        )
+        
+        db.add(version)
+        db.commit()
+        
+        # Update batch status if needed
+        if batch_id:
+            batch = db.query(Batch).filter(Batch.id == batch_id).first()
+            if batch:
+                batch.processed_count = batch.processed_count + 1 if batch.processed_count else 1
+                
+                # Check if all documents in batch are processed
+                if batch.processed_count >= batch.document_count:
+                    batch.status = BatchStatus.COMPLETED
+                    batch.completed_at = datetime.utcnow()
+                
+                batch.updated_at = datetime.utcnow()
+                db.commit()
+        
+        return document
+        
+    except Exception as e:
+        # Update batch status to failed if there's an error
+        if batch_id:
+            batch = db.query(Batch).filter(Batch.id == batch_id).first()
+            if batch:
+                batch.status = BatchStatus.FAILED
+                batch.updated_at = datetime.utcnow()
+                db.commit()
+        raise
