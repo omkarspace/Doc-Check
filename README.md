@@ -4,13 +4,28 @@ An AI-powered document processing platform for BFSI institutions that automates 
 
 ## Features
 
-- Multi-format document upload (PDF, DOCX, JPG/PNG)
-- AI-powered document parsing and OCR
-- Named Entity Recognition and Summarization
-- Document classification
-- Secure data export in multiple formats
-- Role-based access control
-- Integration with multiple AI models
+- **Batch Processing**
+  - Process multiple documents in parallel batches
+  - Track progress with real-time metrics (processed/failed/total documents)
+  - Detailed batch status tracking (pending/processing/completed/failed)
+  - Batch-level metadata and timestamps
+
+- **Document Processing**
+  - Multi-format document upload (PDF, DOCX, JPG/PNG)
+  - AI-powered document parsing and OCR
+  - Named Entity Recognition and Summarization
+  - Document classification and validation
+
+- **Security & Compliance**
+  - Role-based access control
+  - Secure data export in multiple formats
+  - Audit trails for all operations
+  - PII redaction and data encryption
+
+- **AI Integration**
+  - Multiple AI model support (OpenAI, Tesseract OCR)
+  - Custom processing pipelines
+  - Extensible architecture for new document types
 
 ## Tech Stack
 
@@ -37,9 +52,45 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
+## Batch Processing
+
+DocuGenie provides robust batch processing capabilities for handling large volumes of documents efficiently.
+
+### Batch Lifecycle
+
+1. **Create Batch**
+   - Initialize a new batch with metadata and document type
+   - Set processing parameters and priority
+
+2. **Upload Documents**
+   - Add multiple documents to a batch
+   - Supports drag-and-drop and programmatic uploads
+
+3. **Processing**
+   - Automatic document classification
+   - Parallel processing of documents within a batch
+   - Real-time progress tracking
+
+4. **Completion**
+   - Detailed processing reports
+   - Error handling and retry mechanisms
+   - Export of processed data
+
+### API Endpoints
+
+- `POST /api/batches` - Create a new batch
+- `POST /api/batches/{batch_id}/documents` - Add documents to a batch
+- `GET /api/batches/{batch_id}` - Get batch status and metrics
+- `GET /api/batches` - List all batches with filtering options
+- `PATCH /api/batches/{batch_id}` - Update batch metadata
+- `DELETE /api/batches/{batch_id}` - Cancel a batch
+
 ## API Documentation
 
-Swagger UI: http://localhost:8000/docs
+For detailed API documentation and interactive testing, visit the Swagger UI:
+
+- **Development**: http://localhost:8000/docs
+- **Production**: [Your Production URL]/docs
 
 ## Security
 
