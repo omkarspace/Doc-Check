@@ -4,6 +4,10 @@ from app.database.database import Base
 from datetime import datetime
 from enum import Enum as PyEnum
 from typing import List, Optional
+from passlib.context import CryptContext
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class UserRole(str, PyEnum):
     ADMIN = "admin"
@@ -32,3 +36,29 @@ class User(Base):
     @property
     def is_superuser(self) -> bool:
         return self.role == UserRole.ADMIN
+        
+    def verify_password(self, password: str) -> bool:
+        """Verify password against stored hash."""
+        return pwd_context.verify(password, self.hashed_password)
+        
+    def set_password(self, password: str) -> None:
+        """Set a new password."""
+        self.hashed_password = pwd_context.hash(password)
+        
+    @classmethod
+    def get_by_email(cls, db, email: str):
+        """Get user by email."""
+        return db.query(cls).filter(cls.email == email).first()
+        
+    def to_dict(self):
+        """Convert user object to dictionary."""
+        return {
+            "id": self.id,
+            "email": self.email,
+            "username": self.username,
+            "full_name": self.full_name,
+            "role": self.role.value,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

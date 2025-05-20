@@ -45,8 +45,37 @@ def get_db():
 
 def init_db():
     """
-    Initialize the database by creating all tables
+    Initialize the database by creating all tables and creating default admin user
     """
     import app.models  # Import all models to register them with SQLAlchemy
+    from app.models.user import User, UserRole
+    from app.core.security import get_password_hash
+    
+    # Create all tables
     Base.metadata.create_all(bind=engine)
+    
+    # Create default admin user if it doesn't exist
+    db = SessionLocal()
+    try:
+        admin_email = "admin@example.com"
+        admin = db.query(User).filter(User.email == admin_email).first()
+        
+        if not admin:
+            admin = User(
+                email=admin_email,
+                username="admin",
+                hashed_password=get_password_hash("admin123"),
+                full_name="Admin User",
+                role=UserRole.ADMIN,
+                is_active=True
+            )
+            db.add(admin)
+            db.commit()
+            print(f"Created default admin user with email: {admin_email} and password: admin123")
+        
+    except Exception as e:
+        db.rollback()
+        print(f"Error creating default admin user: {e}")
+    finally:
+        db.close()
     print(f"Database initialized at: {DATABASE_URL}")

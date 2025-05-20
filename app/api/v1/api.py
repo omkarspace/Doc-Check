@@ -1,18 +1,24 @@
 from fastapi import APIRouter
-from . import __all__ as endpoints
 
 # Create the v1 API router
 router = APIRouter()
 
-# Import all endpoints to register their routes
-from . import auth, users, documents, document_versions, templates, batches, export, dashboard
+# Import and include routers directly
+from app.api.v1.auth import router as auth_router
+from app.api.v1.users import router as users_router
+from app.api.v1.documents import router as documents_router
+from app.api.v1.document_versions import router as document_versions_router
+from app.api.v1.templates import router as templates_router
+from app.api.v1.batches import router as batches_router
+from app.api.v1.export import router as export_router
+from app.api.v1.dashboard import router as dashboard_router
 
 # Include all API endpoints
-router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-router.include_router(users.router, prefix="/users", tags=["Users"])
-router.include_router(documents.router, prefix="/documents", tags=["Documents"])
-router.include_router(document_versions.router, prefix="/document-versions", tags=["Document Versions"])
-router.include_router(templates.router, prefix="/templates", tags=["Templates"])
-router.include_router(batches.router, prefix="/batches", tags=["Batches"])
-router.include_router(export.router, prefix="/export", tags=["Export"])
-router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+router.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+router.include_router(users_router, prefix="/users", tags=["Users"])
+router.include_router(documents_router, prefix="/documents", tags=["Documents"])
+router.include_router(document_versions_router, prefix="/document-versions", tags=["Document Versions"])
+router.include_router(templates_router, prefix="/templates", tags=["Templates"])
+router.include_router(batches_router, prefix="/batches", tags=["Batches"])
+router.include_router(export_router, prefix="/export", tags=["Export"])
+router.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
